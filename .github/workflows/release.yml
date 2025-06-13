@@ -1,0 +1,46 @@
+name: Tag Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  tagged-release:
+    name: "Tagged Release"
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: 3.8
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[tfcpu,api,dev,testing,linting,game]
+
+      - name: Test with pytest
+        run: |
+          pip install python-coveralls
+          python -m pytest --cov=./dfp --cov-report lcov:lcov.info
+
+      - name: Build
+        run: |
+          pip install setuptools sdist wheel twine
+          pip install -e .[tfcpu,api,game]
+          python setup.py sdist bdist_wheel
+
+      # - name: Publish distribution 📦 to PyPI
+      #   uses: pypa/gh-action-pypi-publish@master
+      #   with:
+      #     password: ${{ secrets.PYPI_API_TOKEN }}
+      - uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: |
+            ./dist/*tar.gz
+            ./dist/*.whl

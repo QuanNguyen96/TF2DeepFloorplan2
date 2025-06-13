@@ -1,0 +1,58 @@
+Metadata-Version: 2.1
+Name: dfp
+Version: 0.0.6.dev1+gb5860f2.d20250522
+Summary: Deep Floorplan (dfp)
+Author: Leo Leung
+License-File: LICENSE
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: opencv-python
+Requires-Dist: pdbpp
+Requires-Dist: scipy
+Requires-Dist: Pillow
+Requires-Dist: gdown
+Requires-Dist: protobuf
+Requires-Dist: chardet
+Requires-Dist: types-requests
+Requires-Dist: dynaconf
+Provides-Extra: api
+Requires-Dist: Flask; extra == "api"
+Requires-Dist: Flask-Bcrypt; extra == "api"
+Requires-Dist: Flask-Classful; extra == "api"
+Requires-Dist: Flask-Cors; extra == "api"
+Requires-Dist: Flask-Ext; extra == "api"
+Requires-Dist: Flask-Jsonpify; extra == "api"
+Requires-Dist: Flask-Markdown; extra == "api"
+Requires-Dist: Flask-WTF; extra == "api"
+Provides-Extra: dev
+Requires-Dist: pre-commit; extra == "dev"
+Provides-Extra: game
+Requires-Dist: pygame; extra == "game"
+Requires-Dist: numba; extra == "game"
+Provides-Extra: jupyter
+Requires-Dist: jupyterlab; extra == "jupyter"
+Requires-Dist: notebook; extra == "jupyter"
+Provides-Extra: linting
+Requires-Dist: black==22.3.0; extra == "linting"
+Requires-Dist: isort==5.10.1; extra == "linting"
+Requires-Dist: flake8==4.0.1; extra == "linting"
+Requires-Dist: mypy==0.961; extra == "linting"
+Provides-Extra: testing
+Requires-Dist: pytest; extra == "testing"
+Requires-Dist: pytest-cov; extra == "testing"
+Requires-Dist: pytest-mock; extra == "testing"
+Requires-Dist: pytest-flask; extra == "testing"
+Provides-Extra: tfcpu
+Requires-Dist: tensorflow-cpu; extra == "tfcpu"
+Requires-Dist: tensorboard; extra == "tfcpu"
+Requires-Dist: tensorflow-model-optimization; extra == "tfcpu"
+Provides-Extra: tfgpu
+Requires-Dist: tensorflow-gpu==2.3.0; extra == "tfgpu"
+Requires-Dist: tensorboard==2.3.0; extra == "tfgpu"
+Requires-Dist: tensorflow-model-optimization==0.5.0; extra == "tfgpu"
+Provides-Extra: tfmacm1
+Requires-Dist: tensorflow-macos; extra == "tfmacm1"
+Requires-Dist: tensorflow-metal; extra == "tfmacm1"
+Requires-Dist: tensorboard; extra == "tfmacm1"
+Requires-Dist: tensorflow-model-optimization; extra == "tfmacm1"
+
