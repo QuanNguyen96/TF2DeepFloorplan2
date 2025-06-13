@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
 import io
-from TF2DeepFloorplan import predict_data,smooth_wall,cal_door_window
+from TF2DeepFloorplan import predict_data,predict_data_v2,smooth_wall,cal_door_window
 
 app = FastAPI()
 app.add_middleware(
@@ -37,7 +37,9 @@ async def TF_DeepFloorplan(image: UploadFile = File(...)):  # field tên 'image'
     pil_image = Image.open(image_stream)
     
     # print("pil_image",pil_image)
-    results = predict_data(pil_image,filename)
+    # results = predict_data(pil_image,filename)
+    results = predict_data_v2(pil_image,filename)
+    
     return JSONResponse(content={"data": results})
   except:
     return JSONResponse(content={"data": ""}, status_code=404)

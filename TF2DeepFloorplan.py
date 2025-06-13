@@ -225,6 +225,149 @@ def predict_data(pil_image,filename):
   results = export_floorplan_json(newr, newcw,color_to_unified_id,unified_labels, filename="floorplan4.json",)
   return results
   
+
+def extract_black_pixels(image_path, threshold=30, min_region_size=10):
+    """
+    Trích xuất pixel gần màu đen và loại bỏ các cụm nhỏ hơn ngưỡng.
+    
+    Args:
+        image_path: Đường dẫn ảnh đầu vào.
+        threshold: Ngưỡng độ đen (0-255).
+        min_region_size: Số pixel nhỏ nhất để giữ lại 1 vùng liên thông.
+        
+    Returns:
+        image: ảnh gốc
+        clean_mask: mask nhị phân (0 hoặc 1) sau khi đã loại nhiễu nhỏ.
+    """
+    # Đọc ảnh RGB
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError("Không đọc được ảnh!")
+
+    # Tính khoảng cách màu với đen
+    distance = np.linalg.norm(image.astype(np.int16), axis=2)
+    mask = (distance < threshold).astype(np.uint8)
+
+    # Gán nhãn các vùng liên thông
+    num_labels, labels = cv2.connectedComponents(mask)
+
+    # Tạo mask mới và giữ lại vùng đủ lớn
+    clean_mask = np.zeros_like(mask)
+    for label in range(1, num_labels):  # Bỏ label 0 (nền)
+        region_size = np.sum(labels == label)
+        if region_size >= min_region_size:
+            clean_mask[labels == label] = 1
+
+    return image, clean_mask
+
+
+def predict_data_v2(pil_image,filename):
+  if pil_image is None:
+    return
+  # img_path = "./resources/30939153.jpg"
+  # inp = mpimg.imread(img_path)
+  # # # print(inp)
+  #  inp = np.array(pil_image)
+
+  # Tạo file tạm và lưu ảnh vào
+  suffix = os.path.splitext(filename)[1]  # vd: ".png"
+  if not suffix:
+    suffix = ".jpg"
+  with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+    pil_image.save(tmp.name)
+    tmp_path = tmp.name  # đường dẫn tạm thời
+    
+  
+  args = parse_args("--tomlfile ./docs/notebook.toml".split())
+  args = overwrite_args_with_toml(args)
+  args.image = tmp_path
+
+#   result = main(args)
+
+#   plt.subplot(1, 2, 1)
+#   plt.imshow(inp)
+#   plt.xticks([])
+#   plt.yticks([])
+#   plt.subplot(1, 2, 2)
+#   plt.imshow(result)
+#   plt.xticks([])
+#   plt.yticks([])
+
+  model,img,shp = init(args)
+  logits_cw,logits_r = predict(model,img,shp)
+
+
+  logits_r = tf.image.resize(logits_r,shp[:2])
+  logits_cw = tf.image.resize(logits_cw,shp[:2])
+  r = convert_one_hot_to_image(logits_r)[0].numpy()
+  cw = convert_one_hot_to_image(logits_cw)[0].numpy()
+#   plt.subplot(1,2,1)
+#   plt.imshow(r.squeeze()); plt.xticks([]); plt.yticks([])
+#   plt.subplot(1,2,2)
+#   plt.imshow(cw.squeeze()); plt.xticks([]); plt.yticks([])
+
+
+#   r_color,cw_color = colorize(r.squeeze(),cw.squeeze())
+#   plt.subplot(1,2,1)
+#   plt.imshow(r_color); plt.xticks([]); plt.yticks([])
+#   plt.subplot(1,2,2)
+#   plt.imshow(cw_color); plt.xticks([]); plt.yticks([])
+
+
+  newr,newcw = post_process(r,cw,shp)
+
+#   plt.subplot(1,2,1)
+#   plt.imshow(newr.squeeze()); plt.xticks([]); plt.yticks([])
+#   plt.subplot(1,2,2)
+#   plt.imshow(newcw.squeeze()); plt.xticks([]); plt.yticks([])
+
+
+#   newr_color,newcw_color = colorize(newr.squeeze(),newcw.squeeze())
+
+  
+#   plt.subplot(1,2,1)
+#   plt.imshow(newr_color); plt.xticks([]); plt.yticks([])
+#   plt.subplot(1,2,2)
+#   plt.imshow(newcw_color); plt.xticks([]); plt.yticks([])
+#   plt.imshow(newr_color+newcw_color); plt.xticks([]); plt.yticks([])
+# #   buf = io.BytesIO()
+#   os.makedirs('./output', exist_ok=True)
+#   plt.savefig(f'./output/{filename}', bbox_inches='tight', pad_inches=0)
+  
+  # plt.show()
+
+
+  unified_labels = {
+      0: {"label": "background", "color": np.array([0, 0, 0])},
+      1: {"label": "closet", "color": np.array([192, 192, 224])},
+      2: {"label": "bathroom", "color": np.array([192, 255, 255])},
+      3: {"label": "living room/kitchen/dining room", "color": np.array([224, 255, 192])},
+      4: {"label": "bedroom", "color": np.array([255, 224, 128])},
+      5: {"label": "hall", "color": np.array([255, 160, 96])},
+      6: {"label": "balcony", "color": np.array([255, 224, 224])},
+      7: {"label": "notuse7", "color": np.array([224, 224, 224])},
+      8: {"label": "notuse8", "color": np.array([224, 224, 128])},
+      9: {"label": "door/window", "color": np.array([255, 60, 128])},
+      10: {"label": "wall", "color": np.array([255, 255, 255])}
+  }
+
+  # Build color-to-ID mapping to reverse lookup
+  color_to_unified_id = {}
+  for k, v in unified_labels.items():
+    color_to_unified_id[tuple(v["color"])] = k
+
+  results = export_floorplan_json(newr, newcw,color_to_unified_id,unified_labels, filename="floorplan4.json",)
+#   image_path = "./resources/30939153.jpg"
+  image_2, clean_mask = extract_black_pixels(tmp_path, threshold=30, min_region_size=30)
+  traightened_smooth = smooth_map_cv2(clean_mask, method='both', structure_size=3)
+  traightened_smooth = straighten_wall_map(traightened_smooth, epsilon = 2,min_area=50)
+  ketqua = group_consecutive_regions(traightened_smooth)
+#   print("ketqua=",ketqua)
+#   plt.clf()  # xóa figure cũ
+#   plt.imshow(ketqua, cmap='gray')
+#   plt.show()
+  return results
+  
   
 # predict_data("fsdfds")
 
@@ -247,46 +390,110 @@ def extract_large_contours(binary_img, min_area=50):
     large_contours = [cnt for cnt in contours if cv2.contourArea(cnt) >= min_area]
     return large_contours
 
-def make_contour_axis_aligned(contour, epsilon=3):
-    """Xấp xỉ contour vuông góc và căn chỉnh theo trục X hoặc Z"""
+# def make_contour_axis_aligned(contour, epsilon=3):
+#     """Xấp xỉ contour vuông góc và căn chỉnh theo trục X hoặc Z"""
+#     approx = cv2.approxPolyDP(contour, epsilon, closed=True)
+#     aligned = []
+
+#     for pt in approx:
+#         aligned.append(pt[0].copy())
+
+#     for i in range(len(aligned) - 1):
+#         p1 = aligned[i]
+#         p2 = aligned[i + 1]
+
+#         dx = abs(p1[0] - p2[0])
+#         dy = abs(p1[1] - p2[1])
+#         if dx > dy:
+#             p2[1] = p1[1]  # Ép ngang
+#         elif dy > dx:
+#             p2[0] = p1[0]  # Ép dọc
+#         # Nếu gần bằng nhau thì giữ nguyên (để tránh phá đường nghiêng nhẹ)
+
+#     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
+
+def make_contour_axis_aligned(contour, epsilon=3, merge_thresh=2):
+    """Xấp xỉ contour vuông góc, và gom các cạnh gần nhau thành thẳng hàng"""
     approx = cv2.approxPolyDP(contour, epsilon, closed=True)
-    aligned = []
+    aligned = [pt[0].copy() for pt in approx]
 
-    for pt in approx:
-        aligned.append(pt[0].copy())
-
-    for i in range(len(aligned) - 1):
+    # Bước 1: Làm vuông từng đoạn
+    for i in range(len(aligned)):
         p1 = aligned[i]
-        p2 = aligned[i + 1]
-
+        p2 = aligned[(i + 1) % len(aligned)]
         dx = abs(p1[0] - p2[0])
         dy = abs(p1[1] - p2[1])
         if dx > dy:
-            p2[1] = p1[1]  # Ép ngang
+            p2[1] = p1[1]
         elif dy > dx:
-            p2[0] = p1[0]  # Ép dọc
-        # Nếu gần bằng nhau thì giữ nguyên (để tránh phá đường nghiêng nhẹ)
+            p2[0] = p1[0]
 
+    # Bước 2: Gom cạnh gần nhau theo trục ngắn (≤ merge_thresh)
+    def merge_aligned_points(points, axis):
+        coord_idx = 0 if axis == 'x' else 1
+        groups = []
+        used = [False] * len(points)
+
+        for i in range(len(points)):
+            if used[i]:
+                continue
+            group = [i]
+            for j in range(i+1, len(points)):
+                if not used[j] and abs(points[i][coord_idx] - points[j][coord_idx]) <= merge_thresh:
+                    group.append(j)
+            mean_val = int(round(np.mean([points[k][coord_idx] for k in group])))
+            for k in group:
+                points[k][coord_idx] = mean_val
+                used[k] = True
+
+    merge_aligned_points(aligned, axis='x')
+    merge_aligned_points(aligned, axis='y')
+
+    aligned.append(aligned[0])  # Đảm bảo khép kín
     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
 
+
+# def draw_clean_walls(shape, contours, epsilon=3, min_area=50):
+#     """Vẽ lại các tường đã làm sạch và vuông hóa"""
+#     canvas = np.zeros(shape, dtype=np.uint8)
+#     for cnt in contours:
+#         if cv2.contourArea(cnt) < min_area:
+#             continue
+#         aligned_cnt = make_contour_axis_aligned(cnt, epsilon)
+#         cv2.drawContours(canvas, [aligned_cnt], -1, 255, thickness=-1)
+#     return (canvas > 0).astype(np.uint8)
 
 def draw_clean_walls(shape, contours, epsilon=3, min_area=50):
     """Vẽ lại các tường đã làm sạch và vuông hóa"""
     canvas = np.zeros(shape, dtype=np.uint8)
-    for cnt in contours:
-        if cv2.contourArea(cnt) < min_area:
+    for idx, cnt in enumerate(contours):
+        area = cv2.contourArea(cnt)
+        if area < min_area:
             continue
+       # Tạo canvas hiển thị debug cho từng contour
+        # Tạo canvas hiển thị debug cho từng contour
         aligned_cnt = make_contour_axis_aligned(cnt, epsilon)
         cv2.drawContours(canvas, [aligned_cnt], -1, 255, thickness=-1)
     return (canvas > 0).astype(np.uint8)
 
+# def straighten_wall_map(wall_map, epsilon=3, min_area=50):
+#     """Pipeline xử lý toàn diện: mịn hóa + lọc nhiễu + vuông hóa"""
+#     processed = preprocess_wall_map(wall_map)
+#     contours = extract_large_contours(processed, min_area=min_area)
+#     straightened = draw_clean_walls(processed.shape, contours, epsilon=epsilon, min_area=min_area)
+#     return straightened
 def straighten_wall_map(wall_map, epsilon=3, min_area=50):
     """Pipeline xử lý toàn diện: mịn hóa + lọc nhiễu + vuông hóa"""
     processed = preprocess_wall_map(wall_map)
     contours = extract_large_contours(processed, min_area=min_area)
-    straightened = draw_clean_walls(processed.shape, contours, epsilon=epsilon, min_area=min_area)
-    return straightened
+    
+    debug_canvas = np.stack([processed * 255]*3, axis=-1).astype(np.uint8) 
+    
+    cv2.drawContours(debug_canvas, contours, -1, (0, 255, 0), 1)
 
+    straightened = draw_clean_walls(processed.shape, contours, epsilon=epsilon, min_area=min_area)
+    
+    return straightened
 
 def smooth_map_cv2(grid, method='open', structure_size=3):
     kernel = np.ones((structure_size, structure_size), np.uint8)
@@ -412,10 +619,43 @@ def find_consecutive_ranges(arr):
 
     return result, min_i, max_i, min_j, max_j
 
+def group_consecutive_regions(arr):
+    """
+    Group các đoạn pixel 1 liên tiếp theo hàng hoặc cột trong mảng nhị phân.
+
+    Args:
+        arr (np.ndarray): 2D array chỉ chứa 0 hoặc 1
+
+    Returns:
+        List[Dict]: mỗi dict có dạng {'start': [i, j], 'end': [i, j]}
+    """
+    result = []
+
+    # Theo hàng (i cố định, j tăng)
+    for i in range(arr.shape[0]):
+        js = np.where(arr[i] == 1)[0]
+        if len(js) == 0:
+            continue
+        for j_start, j_end in merge_consecutive(sorted(js)):
+            result.append({'start': [i, j_start], 'end': [i, j_end]})
+
+    # Theo cột (j cố định, i tăng)
+    for j in range(arr.shape[1]):
+        is_ = np.where(arr[:, j] == 1)[0]
+        if len(is_) == 0:
+            continue
+        for i_start, i_end in merge_consecutive(sorted(is_)):
+            # Tránh lặp nếu đoạn chỉ 1 điểm và đã có ở chiều hàng
+            if i_start == i_end:
+                continue
+            result.append({'start': [i_start, j], 'end': [i_end, j]})
+
+    return result
+
 def smooth_wall(size,walls):
     arr_numpy = create_region_grid(size, walls)
     straightened = smooth_map_cv2(arr_numpy, method='both', structure_size=3)
-    straightened = straighten_wall_map(straightened, epsilon = 0.96)
+    straightened = straighten_wall_map(straightened, epsilon = 0.96 ,min_area=50)
     array_list = straightened.T.tolist()
     result, min_i, max_i, min_j, max_j = find_consecutive_ranges(straightened)
     # print("type results=", type(result))

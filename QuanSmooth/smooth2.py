@@ -27,56 +27,287 @@ def extract_large_contours(binary_img, min_area=50):
     contours, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     large_contours = [cnt for cnt in contours if cv2.contourArea(cnt) >= min_area]
     return large_contours
+  
+def group_points_axis_aligned(points, tolerance=1):
+    """Gom các điểm (x, y) thành các hình chữ nhật khít trục X/Y"""
+    from collections import defaultdict
+    point_set = set(points)
+    visited = set()
+    rects = []
 
-def make_contour_axis_aligned(contour, epsilon=3):
-    """Xấp xỉ contour vuông góc và căn chỉnh theo trục X hoặc Z"""
+    for x, y in points:
+        if (x, y) in visited:
+            continue
+
+        # mở rộng theo X
+        x_end = x
+        while (x_end + 1, y) in point_set:
+            x_end += 1
+
+        # mở rộng theo Y
+        y_end = y
+        while all((xi, y_end + 1) in point_set for xi in range(x, x_end + 1)):
+            y_end += 1
+
+        # Đánh dấu đã dùng
+        for xi in range(x, x_end + 1):
+            for yi in range(y, y_end + 1):
+                visited.add((xi, yi))
+
+        # Thêm hình chữ nhật
+        rects.append((x, y, x_end - x + 1, y_end - y + 1))  # (x, y, w, h)
+
+    return rects
+# def extract_large_contours(binary_img, min_area=4):
+#     """
+#     Chia nhỏ ảnh nhị phân thành các contour hình chữ nhật axis-aligned (khít theo lưới).
+#     Trả về list các contour hình (Nx1x2) như OpenCV yêu cầu.
+#     """
+#     h, w = binary_img.shape
+#     visited = np.zeros_like(binary_img, dtype=bool)
+#     contours = []
+
+#     for i in range(h):
+#         for j in range(w):
+#             if binary_img[i, j] == 1 and not visited[i, j]:
+#                 # Bắt đầu mở rộng từ (i, j)
+#                 x1, y1 = j, i
+#                 x2 = x1
+#                 while x2 + 1 < w and binary_img[y1, x2 + 1] == 1 and not visited[y1, x2 + 1]:
+#                     x2 += 1
+
+#                 y2 = y1
+#                 valid = True
+#                 while y2 + 1 < h and valid:
+#                     for x in range(x1, x2 + 1):
+#                         if binary_img[y2 + 1, x] != 1 or visited[y2 + 1, x]:
+#                             valid = False
+#                             break
+#                     if valid:
+#                         y2 += 1
+
+#                 # Đánh dấu đã dùng
+#                 for y in range(y1, y2 + 1):
+#                     for x in range(x1, x2 + 1):
+#                         visited[y, x] = True
+
+#                 # Tính diện tích và thêm contour nếu đủ lớn
+#                 area = (x2 - x1 + 1) * (y2 - y1 + 1)
+#                 if area >= min_area:
+#                     cnt = np.array([
+#                         [[x1, y1]],
+#                         [[x2 + 1, y1]],
+#                         [[x2 + 1, y2 + 1]],
+#                         [[x1, y2 + 1]]
+#                     ], dtype=np.int32)
+#                     contours.append(cnt)
+
+#     return contours
+
+# def make_contour_axis_aligned(contour, epsilon=3):
+#     """Xấp xỉ contour vuông góc và căn chỉnh theo trục X hoặc Z"""
+#     approx = cv2.approxPolyDP(contour, epsilon, closed=True)
+#     aligned = []
+
+#     for pt in approx:
+#         aligned.append(pt[0].copy())
+
+#     for i in range(len(aligned) - 1):
+#         p1 = aligned[i]
+#         p2 = aligned[i + 1]
+
+#         dx = abs(p1[0] - p2[0])
+#         dy = abs(p1[1] - p2[1])
+#         if dx > dy:
+#             p2[1] = p1[1]  # Ép ngang
+#         elif dy > dx:
+#             p2[0] = p1[0]  # Ép dọc
+#         # Nếu gần bằng nhau thì giữ nguyên (để tránh phá đường nghiêng nhẹ)
+
+#     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
+
+# def make_contour_axis_aligned(contour, epsilon=3):
+#     """Xấp xỉ contour và căn chỉnh theo trục X/Y"""
+#     approx = cv2.approxPolyDP(contour, epsilon, closed=True)
+#     aligned = []
+
+#     for pt in approx:
+#         aligned.append(pt[0].copy())
+
+#     for i in range(len(aligned)):
+#         p1 = aligned[i]
+#         p2 = aligned[(i + 1) % len(aligned)]  # nối vòng tròn
+
+#         dx = abs(p1[0] - p2[0])
+#         dy = abs(p1[1] - p2[1])
+
+#         if dx > dy:
+#             p2[1] = p1[1]
+#         elif dy > dx:
+#             p2[0] = p1[0]
+
+#     # Đảm bảo khép kín
+#     aligned.append(aligned[0])
+
+#     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
+
+def make_contour_axis_aligned(contour, epsilon=3, merge_thresh=2):
+    """Xấp xỉ contour vuông góc, và gom các cạnh gần nhau thành thẳng hàng"""
     approx = cv2.approxPolyDP(contour, epsilon, closed=True)
-    aligned = []
+    aligned = [pt[0].copy() for pt in approx]
 
-    for pt in approx:
-        aligned.append(pt[0].copy())
-
-    for i in range(len(aligned) - 1):
+    # Bước 1: Làm vuông từng đoạn
+    for i in range(len(aligned)):
         p1 = aligned[i]
-        p2 = aligned[i + 1]
-
+        p2 = aligned[(i + 1) % len(aligned)]
         dx = abs(p1[0] - p2[0])
         dy = abs(p1[1] - p2[1])
         if dx > dy:
-            p2[1] = p1[1]  # Ép ngang
+            p2[1] = p1[1]
         elif dy > dx:
-            p2[0] = p1[0]  # Ép dọc
-        # Nếu gần bằng nhau thì giữ nguyên (để tránh phá đường nghiêng nhẹ)
+            p2[0] = p1[0]
 
+    # Bước 2: Gom cạnh gần nhau theo trục ngắn (≤ merge_thresh)
+    def merge_aligned_points(points, axis):
+        coord_idx = 0 if axis == 'x' else 1
+        groups = []
+        used = [False] * len(points)
+
+        for i in range(len(points)):
+            if used[i]:
+                continue
+            group = [i]
+            for j in range(i+1, len(points)):
+                if not used[j] and abs(points[i][coord_idx] - points[j][coord_idx]) <= merge_thresh:
+                    group.append(j)
+            mean_val = int(round(np.mean([points[k][coord_idx] for k in group])))
+            for k in group:
+                points[k][coord_idx] = mean_val
+                used[k] = True
+
+    merge_aligned_points(aligned, axis='x')
+    merge_aligned_points(aligned, axis='y')
+
+    aligned.append(aligned[0])  # Đảm bảo khép kín
     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
+
+# def make_contour_axis_aligned(contour, mask, epsilon=3):
+#     """Xấp xỉ contour vuông góc, gom điểm gần nhau, và làm sạch mask theo trục"""
+
+#     H, W = mask.shape
+#     merge_thresh = 2
+
+#     approx = cv2.approxPolyDP(contour, epsilon, closed=True)
+#     aligned = [pt[0].copy() for pt in approx]
+
+#     # Bước 1: Làm vuông từng đoạn
+#     for i in range(len(aligned)):
+#         p1 = aligned[i]
+#         p2 = aligned[(i + 1) % len(aligned)]
+#         dx = abs(p1[0] - p2[0])
+#         dy = abs(p1[1] - p2[1])
+#         if dx > dy:
+#             p2[1] = p1[1]
+#         elif dy > dx:
+#             p2[0] = p1[0]
+
+#     # Bước 2: Gom các điểm gần nhau (thẳng hàng)
+#     def merge_aligned_points(points, axis):
+#         coord_idx = 0 if axis == 'x' else 1
+#         used = [False] * len(points)
+#         for i in range(len(points)):
+#             if used[i]:
+#                 continue
+#             group = [i]
+#             for j in range(i+1, len(points)):
+#                 if not used[j] and abs(points[i][coord_idx] - points[j][coord_idx]) <= merge_thresh:
+#                     group.append(j)
+#             mean_val = int(round(np.mean([points[k][coord_idx] for k in group])))
+#             for k in group:
+#                 points[k][coord_idx] = mean_val
+#                 used[k] = True
+
+#     merge_aligned_points(aligned, 'x')
+#     merge_aligned_points(aligned, 'y')
+
+#     # Bước 3: Xóa vùng nhiễu nếu trên trục số lượng nhãn 1 quá ít
+#     def clean_mask_lines(mask, axis):
+#         counts = {}
+#         for y in range(H):
+#             for x in range(W):
+#                 if mask[y, x] == 1:
+#                     key = x if axis == 'x' else y
+#                     counts[key] = counts.get(key, 0) + 1
+
+#         for key, count in counts.items():
+#             total = H if axis == 'x' else W
+#             if count / total <= 0.3:
+#                 if axis == 'x' and 0 <= key < W:
+#                     mask[:, key] = 0
+#                 elif axis == 'y' and 0 <= key < H:
+#                     mask[key, :] = 0
+
+#     clean_mask_lines(mask, 'x')
+#     clean_mask_lines(mask, 'y')
+
+#     # Khép kín contour
+#     aligned.append(aligned[0])
+#     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
+
 
 
 def draw_clean_walls(shape, contours, epsilon=3, min_area=50):
     """Vẽ lại các tường đã làm sạch và vuông hóa"""
     canvas = np.zeros(shape, dtype=np.uint8)
-    epsilon_2=epsilon
-    for cnt in contours:
-       # Tạo canvas hiển thị debug cho từng contour
-        debug_canvas = np.zeros((shape[0], shape[1], 3), dtype=np.uint8)
-        cv2.drawContours(debug_canvas, [cnt], -1, (0, 255, 0), 1)  # Vẽ contour màu xanh
-
-        plt.figure(figsize=(10, 10))
-        plt.imshow(debug_canvas)
-        plt.title("Contour trước khi vuông hóa")
-        plt.show()
-        print("area=",cv2.contourArea(cnt))
-        if cv2.contourArea(cnt) < min_area:
+    # epsilon_2=epsilon
+    epsilon_2=1
+    for idx, cnt in enumerate(contours):
+        area = cv2.contourArea(cnt)
+        if area < min_area:
             continue
-        if cv2.contourArea(cnt) > 1000:
-          epsilon_2 = 2.4
+       # Tạo canvas hiển thị debug cho từng contour
+        # Tạo canvas hiển thị debug cho từng contour
         aligned_cnt = make_contour_axis_aligned(cnt, epsilon_2)
         cv2.drawContours(canvas, [aligned_cnt], -1, 255, thickness=-1)
+
+        # Tạo ảnh RGB hiển thị
+        overlay_orig = np.zeros((*shape, 3), dtype=np.uint8)
+        overlay_aligned = np.zeros((*shape, 3), dtype=np.uint8)
+
+        # Vẽ contour gốc màu xanh
+        cv2.drawContours(overlay_orig, [cnt], -1, (0, 255, 0), 1)
+
+        # Vẽ contour đã vuông hóa màu đỏ
+        cv2.drawContours(overlay_aligned, [aligned_cnt], -1, (255, 0, 0), 1)
+
+        # Hiển thị 2 ảnh cạnh nhau
+        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+        axs[0].imshow(overlay_orig)
+        axs[0].set_title(f'Contour gốc (area={area:.1f})')
+        axs[0].axis('off')
+
+        axs[1].imshow(overlay_aligned)
+        axs[1].set_title('Sau vuông hóa')
+        axs[1].axis('off')
+
+        plt.tight_layout()
+        plt.show()
     return (canvas > 0).astype(np.uint8)
 
 def straighten_wall_map(wall_map, epsilon=3, min_area=50):
     """Pipeline xử lý toàn diện: mịn hóa + lọc nhiễu + vuông hóa"""
     processed = preprocess_wall_map(wall_map)
     contours = extract_large_contours(processed, min_area=min_area)
+    
+    debug_canvas = np.stack([processed * 255]*3, axis=-1).astype(np.uint8) 
+    
+    cv2.drawContours(debug_canvas, contours, -1, (0, 255, 0), 1)
+
+    plt.figure(figsize=(8, 8))
+    plt.imshow(debug_canvas)
+    plt.title("Tất cả contours trước vuông hóa")
+    plt.axis("off")
+    plt.show()
     straightened = draw_clean_walls(processed.shape, contours, epsilon=epsilon, min_area=min_area)
     
     return straightened
@@ -209,9 +440,51 @@ mask[8, 3:5] = 1
 mask[8, 7] = 1  # nhiễu lẻ
 print(mask)
 arr_numpy = np.loadtxt("wall1.csv", skiprows=1, delimiter=",", dtype=int)
+
+def extract_black_pixels(image_path, threshold=30, min_region_size=10):
+    """
+    Trích xuất pixel gần màu đen và loại bỏ các cụm nhỏ hơn ngưỡng.
+    
+    Args:
+        image_path: Đường dẫn ảnh đầu vào.
+        threshold: Ngưỡng độ đen (0-255).
+        min_region_size: Số pixel nhỏ nhất để giữ lại 1 vùng liên thông.
+        
+    Returns:
+        image: ảnh gốc
+        clean_mask: mask nhị phân (0 hoặc 1) sau khi đã loại nhiễu nhỏ.
+    """
+    # Đọc ảnh RGB
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError("Không đọc được ảnh!")
+
+    # Tính khoảng cách màu với đen
+    distance = np.linalg.norm(image.astype(np.int16), axis=2)
+    mask = (distance < threshold).astype(np.uint8)
+
+    # Gán nhãn các vùng liên thông
+    num_labels, labels = cv2.connectedComponents(mask)
+
+    # Tạo mask mới và giữ lại vùng đủ lớn
+    clean_mask = np.zeros_like(mask)
+    for label in range(1, num_labels):  # Bỏ label 0 (nền)
+        region_size = np.sum(labels == label)
+        if region_size >= min_region_size:
+            clean_mask[labels == label] = 1
+
+    return image, clean_mask
+
+# Đường dẫn ảnh
+image_path = "./resources/30939153.jpg"
+# image_path = "./resources/123.jpg"
+
+# Trích xuất và lọc nhiễu
+image, clean_mask = extract_black_pixels(image_path, threshold=30, min_region_size=30)
+arr_numpy=clean_mask
 # arr_numpy=mask
 straightened = smooth_map_cv2(arr_numpy, method='both', structure_size=3)
-straightened = straighten_wall_map(straightened, epsilon = 0.9,min_area=50)
+straightened = straighten_wall_map(straightened, epsilon = 5,min_area=50)
 array_list = straightened.T.tolist()
 result, min_i, max_i, min_j, max_j = find_consecutive_ranges(straightened)
 print("straightened=",straightened)
