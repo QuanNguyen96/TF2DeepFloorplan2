@@ -12,7 +12,7 @@ from dfp.net import *
 from dfp.data import *
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
-from collections import defaultdict
+from collections import defaultdict,Counter
 from itertools import groupby
 from argparse import Namespace
 import io
@@ -260,113 +260,178 @@ def extract_black_pixels(image_path, threshold=30, min_region_size=10):
 
     return image, clean_mask
 
+def extract_color_pixels_multi(image_path, target_colors, threshold=30, min_region_size=10):
+    """
+    Lọc pixel gần với bất kỳ màu nào trong danh sách target_colors (RGB).
+    """
+    image = cv2.imread(image_path)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    h, w, _ = image_rgb.shape
 
-def predict_data_v2(pil_image,filename):
-  if pil_image is None:
-    return
-  # img_path = "./resources/30939153.jpg"
-  # inp = mpimg.imread(img_path)
-  # # # print(inp)
-  #  inp = np.array(pil_image)
+    # Khởi tạo mask rỗng
+    mask = np.zeros((h, w), dtype=np.uint8)
 
-  # Tạo file tạm và lưu ảnh vào
-  suffix = os.path.splitext(filename)[1]  # vd: ".png"
-  if not suffix:
-    suffix = ".jpg"
-  with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-    pil_image.save(tmp.name)
-    tmp_path = tmp.name  # đường dẫn tạm thời
+    # Duyệt từng màu và cộng dồn mask
+    for color in target_colors:
+        diff = np.linalg.norm(image_rgb - np.array(color), axis=2)
+        mask |= (diff < threshold).astype(np.uint8)
+
+    # Lọc các vùng nhỏ bằng connected components
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    clean_mask = np.zeros_like(mask)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= min_region_size:
+            clean_mask[labels == i] = 1
+
+    return image_rgb, clean_mask
+
+
+def most_common_color_from_xy(image, xy_points, max_samples=500):
+    """
+    Trả về màu (RGB) xuất hiện nhiều nhất từ các pixel ở tọa độ (x, y).
     
-  
-  args = parse_args("--tomlfile ./docs/notebook.toml".split())
-  args = overwrite_args_with_toml(args)
-  args.image = tmp_path
+    Args:
+        image: ảnh NumPy dạng RGB hoặc BGR tùy input.
+        xy_points: list các (x, y) pixel.
+        max_samples: giới hạn số lượng pixel xét để tăng tốc.
 
-#   result = main(args)
+    Returns:
+        Tuple (R, G, B) hoặc (B, G, R) tùy input.
+    """
+    h, w = image.shape[:2]
+    
+    # Lọc các điểm hợp lệ trong biên ảnh
+    valid_points = [(x, y) for (x, y) in xy_points if 0 <= x < w and 0 <= y < h]
 
-#   plt.subplot(1, 2, 1)
-#   plt.imshow(inp)
-#   plt.xticks([])
-#   plt.yticks([])
-#   plt.subplot(1, 2, 2)
-#   plt.imshow(result)
-#   plt.xticks([])
-#   plt.yticks([])
+    # Lấy mẫu ngẫu nhiên nếu quá nhiều
+    if len(valid_points) > max_samples:
+        sampled_indices = np.random.choice(len(valid_points), max_samples, replace=False)
+        sampled_points = [valid_points[i] for i in sampled_indices]
+    else:
+        sampled_points = valid_points
 
-  model,img,shp = init(args)
-  logits_cw,logits_r = predict(model,img,shp)
+    # Lấy màu
+    pixel_colors = [tuple(image[y, x]) for (x, y) in sampled_points]
 
+    # Đếm và lấy màu phổ biến nhất
+    if not pixel_colors:
+        return (0, 0, 0)  # fallback nếu không có màu hợp lệ
+    return Counter(pixel_colors).most_common(1)[0][0]
+def predict_data_v2(pil_image,filename):
+    if pil_image is None:
+      return
+    # img_path = "./resources/30939153.jpg"
+    # inp = mpimg.imread(img_path)
+    # # # print(inp)
+    #  inp = np.array(pil_image)
 
-  logits_r = tf.image.resize(logits_r,shp[:2])
-  logits_cw = tf.image.resize(logits_cw,shp[:2])
-  r = convert_one_hot_to_image(logits_r)[0].numpy()
-  cw = convert_one_hot_to_image(logits_cw)[0].numpy()
-#   plt.subplot(1,2,1)
-#   plt.imshow(r.squeeze()); plt.xticks([]); plt.yticks([])
-#   plt.subplot(1,2,2)
-#   plt.imshow(cw.squeeze()); plt.xticks([]); plt.yticks([])
+    # Tạo file tạm và lưu ảnh vào
+    suffix = os.path.splitext(filename)[1]  # vd: ".png"
+    if not suffix:
+      suffix = ".jpg"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+      pil_image.save(tmp.name)
+      tmp_path = tmp.name  # đường dẫn tạm thời
+      
 
+    args = parse_args("--tomlfile ./docs/notebook.toml".split())
+    args = overwrite_args_with_toml(args)
+    args.image = tmp_path
+    
+    #   result = main(args)
+    
+    #   plt.subplot(1, 2, 1)
+    #   plt.imshow(inp)
+    #   plt.xticks([])
+    #   plt.yticks([])
+    #   plt.subplot(1, 2, 2)
+    #   plt.imshow(result)
+    #   plt.xticks([])
+    #   plt.yticks([])
+    
+    model,img,shp = init(args)
+    logits_cw,logits_r = predict(model,img,shp)
+    
+    
+    logits_r = tf.image.resize(logits_r,shp[:2])
+    logits_cw = tf.image.resize(logits_cw,shp[:2])
+    r = convert_one_hot_to_image(logits_r)[0].numpy()
+    cw = convert_one_hot_to_image(logits_cw)[0].numpy()
+    #   plt.subplot(1,2,1)
+    #   plt.imshow(r.squeeze()); plt.xticks([]); plt.yticks([])
+    #   plt.subplot(1,2,2)
+    #   plt.imshow(cw.squeeze()); plt.xticks([]); plt.yticks([])
+    
+    
+    #   r_color,cw_color = colorize(r.squeeze(),cw.squeeze())
+    #   plt.subplot(1,2,1)
+    #   plt.imshow(r_color); plt.xticks([]); plt.yticks([])
+    #   plt.subplot(1,2,2)
+    #   plt.imshow(cw_color); plt.xticks([]); plt.yticks([])
+    
+    
+    newr,newcw = post_process(r,cw,shp)
+    
+    #   plt.subplot(1,2,1)
+    #   plt.imshow(newr.squeeze()); plt.xticks([]); plt.yticks([])
+    #   plt.subplot(1,2,2)
+    #   plt.imshow(newcw.squeeze()); plt.xticks([]); plt.yticks([])
+    
+    
+    #   newr_color,newcw_color = colorize(newr.squeeze(),newcw.squeeze())
+    
+    
+    #   plt.subplot(1,2,1)
+    #   plt.imshow(newr_color); plt.xticks([]); plt.yticks([])
+    #   plt.subplot(1,2,2)
+    #   plt.imshow(newcw_color); plt.xticks([]); plt.yticks([])
+    #   plt.imshow(newr_color+newcw_color); plt.xticks([]); plt.yticks([])
+    # #   buf = io.BytesIO()
+    #   os.makedirs('./output', exist_ok=True)
+    #   plt.savefig(f'./output/{filename}', bbox_inches='tight', pad_inches=0)
+    
+      # plt.show()
+    
+    
+    unified_labels = {
+        0: {"label": "background", "color": np.array([0, 0, 0])},
+        1: {"label": "closet", "color": np.array([192, 192, 224])},
+        2: {"label": "bathroom", "color": np.array([192, 255, 255])},
+        3: {"label": "living room/kitchen/dining room", "color": np.array([224, 255, 192])},
+        4: {"label": "bedroom", "color": np.array([255, 224, 128])},
+        5: {"label": "hall", "color": np.array([255, 160, 96])},
+        6: {"label": "balcony", "color": np.array([255, 224, 224])},
+        7: {"label": "notuse7", "color": np.array([224, 224, 224])},
+        8: {"label": "notuse8", "color": np.array([224, 224, 128])},
+        9: {"label": "door/window", "color": np.array([255, 60, 128])},
+        10: {"label": "wall", "color": np.array([255, 255, 255])}
+    }
 
-#   r_color,cw_color = colorize(r.squeeze(),cw.squeeze())
-#   plt.subplot(1,2,1)
-#   plt.imshow(r_color); plt.xticks([]); plt.yticks([])
-#   plt.subplot(1,2,2)
-#   plt.imshow(cw_color); plt.xticks([]); plt.yticks([])
-
-
-  newr,newcw = post_process(r,cw,shp)
-
-#   plt.subplot(1,2,1)
-#   plt.imshow(newr.squeeze()); plt.xticks([]); plt.yticks([])
-#   plt.subplot(1,2,2)
-#   plt.imshow(newcw.squeeze()); plt.xticks([]); plt.yticks([])
-
-
-#   newr_color,newcw_color = colorize(newr.squeeze(),newcw.squeeze())
-
-  
-#   plt.subplot(1,2,1)
-#   plt.imshow(newr_color); plt.xticks([]); plt.yticks([])
-#   plt.subplot(1,2,2)
-#   plt.imshow(newcw_color); plt.xticks([]); plt.yticks([])
-#   plt.imshow(newr_color+newcw_color); plt.xticks([]); plt.yticks([])
-# #   buf = io.BytesIO()
-#   os.makedirs('./output', exist_ok=True)
-#   plt.savefig(f'./output/{filename}', bbox_inches='tight', pad_inches=0)
-  
-  # plt.show()
-
-
-  unified_labels = {
-      0: {"label": "background", "color": np.array([0, 0, 0])},
-      1: {"label": "closet", "color": np.array([192, 192, 224])},
-      2: {"label": "bathroom", "color": np.array([192, 255, 255])},
-      3: {"label": "living room/kitchen/dining room", "color": np.array([224, 255, 192])},
-      4: {"label": "bedroom", "color": np.array([255, 224, 128])},
-      5: {"label": "hall", "color": np.array([255, 160, 96])},
-      6: {"label": "balcony", "color": np.array([255, 224, 224])},
-      7: {"label": "notuse7", "color": np.array([224, 224, 224])},
-      8: {"label": "notuse8", "color": np.array([224, 224, 128])},
-      9: {"label": "door/window", "color": np.array([255, 60, 128])},
-      10: {"label": "wall", "color": np.array([255, 255, 255])}
-  }
-
-  # Build color-to-ID mapping to reverse lookup
-  color_to_unified_id = {}
-  for k, v in unified_labels.items():
-    color_to_unified_id[tuple(v["color"])] = k
-
-  results = export_floorplan_json(newr, newcw,color_to_unified_id,unified_labels, filename="floorplan4.json",)
-#   image_path = "./resources/30939153.jpg"
-  image_2, clean_mask = extract_black_pixels(tmp_path, threshold=30, min_region_size=30)
-  traightened_smooth = smooth_map_cv2(clean_mask, method='both', structure_size=3)
-  traightened_smooth = straighten_wall_map(traightened_smooth, epsilon = 2,min_area=50)
-  ketqua = group_consecutive_regions(traightened_smooth)
-#   print("ketqua=",ketqua)
-#   plt.clf()  # xóa figure cũ
-#   plt.imshow(ketqua, cmap='gray')
-#   plt.show()
-  return results
+    # Build color-to-ID mapping to reverse lookup
+    color_to_unified_id = {}
+    for k, v in unified_labels.items():
+      color_to_unified_id[tuple(v["color"])] = k
+      
+    results = export_floorplan_json(newr, newcw,color_to_unified_id,unified_labels, filename="floorplan4.json",)
+    wall_idx_old = results["wall"][0]["points"]
+    img_copy = cv2.imread(tmp_path)
+    dominant_color = most_common_color_from_xy(img_copy, wall_idx_old, max_samples=400)
+    if dominant_color is None:
+        target_colors = [
+            (0, 0, 0),
+            (126, 126, 126),
+        ]
+    else:
+        target_colors = [
+            dominant_color,
+            # Có thể thêm màu phụ nếu cần
+        ]
+    image_2, clean_mask = extract_color_pixels_multi(tmp_path,target_colors=target_colors,threshold=40, min_region_size=30)
+    traightened_smooth = smooth_map_cv2_v2(clean_mask, method='both', structure_size=3)
+    traightened_smooth = straighten_wall_map_v2(traightened_smooth, epsilon = 1,min_area=30)
+    wall_idx = get_points_from_mask(traightened_smooth)
+    results["wall"]=[{"points":wall_idx}]
+    return results
   
   
 # predict_data("fsdfds")
@@ -452,6 +517,45 @@ def make_contour_axis_aligned(contour, epsilon=3, merge_thresh=2):
     aligned.append(aligned[0])  # Đảm bảo khép kín
     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
 
+def make_contour_axis_aligned_v2(contour, epsilon=3, merge_thresh=2):
+    """Xấp xỉ contour vuông góc, và gom các cạnh gần nhau thành thẳng hàng"""
+    approx = cv2.approxPolyDP(contour, epsilon, closed=True)
+    aligned = [pt[0].copy() for pt in approx]
+
+    # Bước 1: Làm vuông từng đoạn
+    for i in range(len(aligned)):
+        p1 = aligned[i]
+        p2 = aligned[(i + 1) % len(aligned)]
+        dx = abs(p1[0] - p2[0])
+        dy = abs(p1[1] - p2[1])
+        if dx > dy:
+            p2[1] = p1[1]
+        elif dy > dx:
+            p2[0] = p1[0]
+
+    # Bước 2: Gom cạnh gần nhau theo trục ngắn (≤ merge_thresh)
+    def merge_aligned_points(points, axis):
+        coord_idx = 0 if axis == 'x' else 1
+        groups = []
+        used = [False] * len(points)
+
+        for i in range(len(points)):
+            if used[i]:
+                continue
+            group = [i]
+            for j in range(i+1, len(points)):
+                if not used[j] and abs(points[i][coord_idx] - points[j][coord_idx]) <= merge_thresh:
+                    group.append(j)
+            mean_val = int(round(np.mean([points[k][coord_idx] for k in group])))
+            for k in group:
+                points[k][coord_idx] = mean_val
+                used[k] = True
+
+    merge_aligned_points(aligned, axis='x')
+    merge_aligned_points(aligned, axis='y')
+
+    aligned.append(aligned[0])  # Đảm bảo khép kín
+    return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
 
 # def draw_clean_walls(shape, contours, epsilon=3, min_area=50):
 #     """Vẽ lại các tường đã làm sạch và vuông hóa"""
@@ -475,6 +579,25 @@ def draw_clean_walls(shape, contours, epsilon=3, min_area=50):
         aligned_cnt = make_contour_axis_aligned(cnt, epsilon)
         cv2.drawContours(canvas, [aligned_cnt], -1, 255, thickness=-1)
     return (canvas > 0).astype(np.uint8)
+def draw_clean_walls_v2(shape, contours, epsilon=3, min_area=50):
+    canvas = np.zeros(shape, dtype=np.uint8)
+
+    for idx, cnt in enumerate(contours):
+        area = cv2.contourArea(cnt)
+        if area < min_area:
+            continue
+
+        # Vuông hóa contour
+        aligned_cnt = make_contour_axis_aligned_v2(cnt, epsilon)
+
+        # Fill polygon
+        cv2.fillPoly(canvas, [aligned_cnt], 255)
+
+    # Dilation để làm dày nét tường sau vuông hóa
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    canvas = cv2.dilate(canvas, kernel, iterations=1)
+
+    return (canvas > 0).astype(np.uint8)
 
 # def straighten_wall_map(wall_map, epsilon=3, min_area=50):
 #     """Pipeline xử lý toàn diện: mịn hóa + lọc nhiễu + vuông hóa"""
@@ -494,6 +617,18 @@ def straighten_wall_map(wall_map, epsilon=3, min_area=50):
     straightened = draw_clean_walls(processed.shape, contours, epsilon=epsilon, min_area=min_area)
     
     return straightened
+def straighten_wall_map_v2(wall_map, epsilon=3, min_area=50):
+    """Pipeline xử lý toàn diện: mịn hóa + lọc nhiễu + vuông hóa"""
+    processed = preprocess_wall_map(wall_map)
+    contours = extract_large_contours(processed, min_area=min_area)
+    
+    debug_canvas = np.stack([processed * 255]*3, axis=-1).astype(np.uint8) 
+    
+    cv2.drawContours(debug_canvas, contours, -1, (0, 255, 0), 1)
+
+    straightened = draw_clean_walls_v2(processed.shape, contours, epsilon=epsilon, min_area=min_area)
+    
+    return straightened
 
 def smooth_map_cv2(grid, method='open', structure_size=3):
     kernel = np.ones((structure_size, structure_size), np.uint8)
@@ -505,6 +640,21 @@ def smooth_map_cv2(grid, method='open', structure_size=3):
     elif method == 'both':
         opened = cv2.morphologyEx(grid.astype(np.uint8), cv2.MORPH_OPEN, kernel)
         result = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
+    else:
+        raise ValueError("method phải là 'open', 'close' hoặc 'both'")
+
+    return result.astype(int)
+
+def smooth_map_cv2_v2(grid, method='open', structure_size=3):
+    kernel = np.ones((structure_size, structure_size), np.uint8)
+
+    if method == 'open':
+        result = cv2.morphologyEx(grid.astype(np.uint8), cv2.MORPH_OPEN, kernel)
+    elif method == 'close':
+        result = cv2.morphologyEx(grid.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+    elif method == 'both':
+        closed = cv2.morphologyEx(grid.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+        result = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel)
     else:
         raise ValueError("method phải là 'open', 'close' hoặc 'both'")
 

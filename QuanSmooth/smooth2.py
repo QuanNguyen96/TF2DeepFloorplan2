@@ -19,7 +19,8 @@ def preprocess_wall_map(wall_map):
     """Làm mịn ảnh tường bằng phép closing (lấp lỗ)"""
     img = (wall_map * 255).astype(np.uint8)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    closed = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel, iterations=2)
+    # opened = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+    closed = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel, iterations=3)
     return closed
 
 def extract_large_contours(binary_img, min_area=50):
@@ -191,6 +192,8 @@ def make_contour_axis_aligned(contour, epsilon=3, merge_thresh=2):
     aligned.append(aligned[0])  # Đảm bảo khép kín
     return np.array(aligned, dtype=np.int32).reshape(-1, 1, 2)
 
+
+
 # def make_contour_axis_aligned(contour, mask, epsilon=3):
 #     """Xấp xỉ contour vuông góc, gom điểm gần nhau, và làm sạch mask theo trục"""
 
@@ -256,54 +259,77 @@ def make_contour_axis_aligned(contour, epsilon=3, merge_thresh=2):
 
 
 
+# def draw_clean_walls(shape, contours, epsilon=3, min_area=50):
+#     """Vẽ lại các tường đã làm sạch và vuông hóa"""
+#     canvas = np.zeros(shape, dtype=np.uint8)
+#     epsilon_2=epsilon
+#     for idx, cnt in enumerate(contours):
+#         area = cv2.contourArea(cnt)
+#         if area < min_area:
+#             continue
+#        # Tạo canvas hiển thị debug cho từng contour
+#         # Tạo canvas hiển thị debug cho từng contour
+#         aligned_cnt = make_contour_axis_aligned(cnt, epsilon_2)
+#         cv2.drawContours(canvas, [aligned_cnt], -1, 255, thickness=-1)
+
+#         # Tạo ảnh RGB hiển thị
+#         overlay_orig = np.zeros((*shape, 3), dtype=np.uint8)
+#         overlay_aligned = np.zeros((*shape, 3), dtype=np.uint8)
+
+#         # Vẽ contour gốc màu xanh
+#         cv2.drawContours(overlay_orig, [cnt], -1, (0, 255, 0), 1)
+
+#         # Vẽ contour đã vuông hóa màu đỏ
+#         cv2.drawContours(overlay_aligned, [aligned_cnt], -1, (255, 0, 0), 1)
+
+#         # Hiển thị 2 ảnh cạnh nhau
+#         fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+#         axs[0].imshow(overlay_orig)
+#         axs[0].set_title(f'Contour gốc (area={area:.1f})')
+#         axs[0].axis('off')
+
+#         axs[1].imshow(overlay_aligned)
+#         axs[1].set_title('Sau vuông hóa')
+#         axs[1].axis('off')
+
+#         plt.tight_layout()
+#         plt.show()
+#     return (canvas > 0).astype(np.uint8)
+
 def draw_clean_walls(shape, contours, epsilon=3, min_area=50):
-    """Vẽ lại các tường đã làm sạch và vuông hóa"""
     canvas = np.zeros(shape, dtype=np.uint8)
-    # epsilon_2=epsilon
-    epsilon_2=1
+    epsilon_2 = epsilon
+
     for idx, cnt in enumerate(contours):
         area = cv2.contourArea(cnt)
         if area < min_area:
             continue
-       # Tạo canvas hiển thị debug cho từng contour
-        # Tạo canvas hiển thị debug cho từng contour
+
+        # Vuông hóa contour
         aligned_cnt = make_contour_axis_aligned(cnt, epsilon_2)
-        cv2.drawContours(canvas, [aligned_cnt], -1, 255, thickness=-1)
 
-        # Tạo ảnh RGB hiển thị
-        overlay_orig = np.zeros((*shape, 3), dtype=np.uint8)
-        overlay_aligned = np.zeros((*shape, 3), dtype=np.uint8)
+        # Fill polygon
+        cv2.fillPoly(canvas, [aligned_cnt], 255)
 
-        # Vẽ contour gốc màu xanh
-        cv2.drawContours(overlay_orig, [cnt], -1, (0, 255, 0), 1)
+    # Dilation để làm dày nét tường sau vuông hóa
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    canvas = cv2.dilate(canvas, kernel, iterations=1)
 
-        # Vẽ contour đã vuông hóa màu đỏ
-        cv2.drawContours(overlay_aligned, [aligned_cnt], -1, (255, 0, 0), 1)
-
-        # Hiển thị 2 ảnh cạnh nhau
-        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-        axs[0].imshow(overlay_orig)
-        axs[0].set_title(f'Contour gốc (area={area:.1f})')
-        axs[0].axis('off')
-
-        axs[1].imshow(overlay_aligned)
-        axs[1].set_title('Sau vuông hóa')
-        axs[1].axis('off')
-
-        plt.tight_layout()
-        plt.show()
     return (canvas > 0).astype(np.uint8)
+
 
 def straighten_wall_map(wall_map, epsilon=3, min_area=50):
     """Pipeline xử lý toàn diện: mịn hóa + lọc nhiễu + vuông hóa"""
     processed = preprocess_wall_map(wall_map)
+    # processed= smooth_map_cv2(wall_map, method='both', structure_size=3)
+    # processed=(wall_map * 255).astype(np.uint8)
     contours = extract_large_contours(processed, min_area=min_area)
     
     debug_canvas = np.stack([processed * 255]*3, axis=-1).astype(np.uint8) 
     
     cv2.drawContours(debug_canvas, contours, -1, (0, 255, 0), 1)
 
-    plt.figure(figsize=(8, 8))
+    plt.figure(figsize=(18, 18))
     plt.imshow(debug_canvas)
     plt.title("Tất cả contours trước vuông hóa")
     plt.axis("off")
@@ -321,8 +347,8 @@ def smooth_map_cv2(grid, method='open', structure_size=3):
     elif method == 'close':
         result = cv2.morphologyEx(grid.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
     elif method == 'both':
-        opened = cv2.morphologyEx(grid.astype(np.uint8), cv2.MORPH_OPEN, kernel)
-        result = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
+        opened = cv2.morphologyEx(grid.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+        result = cv2.morphologyEx(opened, cv2.MORPH_OPEN, kernel)
     else:
         raise ValueError("method phải là 'open', 'close' hoặc 'both'")
 
@@ -477,16 +503,23 @@ def extract_black_pixels(image_path, threshold=30, min_region_size=10):
 
 # Đường dẫn ảnh
 image_path = "./resources/30939153.jpg"
+# image_path = "./resources/example5.jpg"
 # image_path = "./resources/123.jpg"
 
 # Trích xuất và lọc nhiễu
 image, clean_mask = extract_black_pixels(image_path, threshold=30, min_region_size=30)
+print("straightened=",image)
+plt.clf()  # xóa figure cũ
+plt.figure(figsize=(18, 18))
+plt.imshow(clean_mask, cmap='gray')
+plt.show()
 arr_numpy=clean_mask
 # arr_numpy=mask
 straightened = smooth_map_cv2(arr_numpy, method='both', structure_size=3)
-straightened = straighten_wall_map(straightened, epsilon = 5,min_area=50)
+straightened = straighten_wall_map(straightened, epsilon = 1,min_area=30)
 array_list = straightened.T.tolist()
 result, min_i, max_i, min_j, max_j = find_consecutive_ranges(straightened)
+np.savetxt("test1.csv", straightened, delimiter=",", fmt='%d')
 print("straightened=",straightened)
 plt.clf()  # xóa figure cũ
 plt.imshow(straightened, cmap='gray')
@@ -577,3 +610,59 @@ plt.show()
 
 # plt.tight_layout()
 # plt.show()
+def merge_consecutive(sorted_coords):
+    ranges = []
+    start = sorted_coords[0]
+    prev = start
+    for x in sorted_coords[1:]:
+        if x == prev + 1:
+            prev = x
+        else:
+            ranges.append((start, prev))
+            start = x
+            prev = x
+    ranges.append((start, prev))
+    return ranges
+
+def group_consecutive_regions(arr):
+    """
+    Group các đoạn pixel 1 liên tiếp theo hàng hoặc cột trong mảng nhị phân.
+
+    Args:
+        arr (np.ndarray): 2D array chỉ chứa 0 hoặc 1
+
+    Returns:
+        List[Dict]: mỗi dict có dạng {'start': [i, j], 'end': [i, j]}
+    """
+    result = []
+
+    # Theo hàng (i cố định, j tăng)
+    for i in range(arr.shape[0]):
+        js = np.where(arr[i] == 1)[0]
+        if len(js) == 0:
+            continue
+        for j_start, j_end in merge_consecutive(sorted(js)):
+            result.append({'start': [i, j_start], 'end': [i, j_end]})
+
+    # Theo cột (j cố định, i tăng)
+    for j in range(arr.shape[1]):
+        is_ = np.where(arr[:, j] == 1)[0]
+        if len(is_) == 0:
+            continue
+        for i_start, i_end in merge_consecutive(sorted(is_)):
+            # Tránh lặp nếu đoạn chỉ 1 điểm và đã có ở chiều hàng
+            if i_start == i_end:
+                continue
+            result.append({'start': [i_start, j], 'end': [i_end, j]})
+
+    return result
+
+arr = np.array([
+    [0, 1, 1, 0],
+    [0, 1, 1, 0],
+    [0, 1, 1, 0],
+])
+
+
+kq=group_consecutive_regions(arr)
+print(kq)

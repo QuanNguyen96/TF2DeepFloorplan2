@@ -613,11 +613,11 @@ def export_floorplan_json(newr, newcw, filename="floorplan.json"):
     # df = df.astype(int)
     # tes tới nhãn nào thì để index vào df
     # df_test = 10 # đây là wall 
-    df_test = 10 # đây là cửa/cửa sổ 
+    df_test = 9 # đây là cửa/cửa sổ 
     df_result = pd.DataFrame(np.where(df == df_test, 1, 0))
     
     arr_numpy=df_result.to_numpy()
-    df_result.to_csv("wall2.csv", index=False)
+    df_result.to_csv("door.csv", index=False)
     straightened=arr_numpy
     # print("df",df)
     # straightened = smooth_map(arr_numpy, method='both', structure_size=3)
