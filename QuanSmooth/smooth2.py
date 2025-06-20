@@ -505,6 +505,7 @@ def extract_black_pixels(image_path, threshold=30, min_region_size=10):
 image_path = "./resources/30939153.jpg"
 # image_path = "./resources/example5.jpg"
 # image_path = "./resources/123.jpg"
+# image_path = "./resources/Screenshot_6.png"
 
 # Trích xuất và lọc nhiễu
 image, clean_mask = extract_black_pixels(image_path, threshold=30, min_region_size=30)

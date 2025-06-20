@@ -93,3 +93,40 @@ async def calDoorWindow(request: Request):
     return JSONResponse(content={"data": results})
   except:
     return JSONResponse(content={"data": ""}, status_code=404)
+  
+  
+import requests
+@app.post("/detect-wall-door")
+async def detect_wall_door(
+    image: UploadFile = File(...),
+    modelVersion: str = Form(...),
+    modelName: str = Form(...),
+    confidenceThreshold: str = Form(...),
+    overlapThreshold: str = Form(...)
+):  
+    try:
+        # Đọc nội dung file ảnh
+        contents = await image.read()
+        image_stream = io.BytesIO(contents)
+        pil_image = Image.open(image_stream)
+        width, height = pil_image.size  # Lấy kích thước ảnh gốc
+        # Gọi Roboflow API
+        api_key = "NLr5HisCCUjeLQlUIZsh"
+        model_id = modelName
+        model_version = modelVersion
+        url = f"https://detect.roboflow.com/{model_id}/{model_version}?api_key={api_key}&confidence={confidenceThreshold}&overlap={overlapThreshold}"
+
+        response = requests.post(
+            url,
+            files={"file": ("image.jpg", contents, "image/jpeg")}
+        )
+
+        # Trả về kết quả
+        data = response.json()
+        data["gridSize"]=[width,height]
+
+        return JSONResponse(content={"data": data})
+
+    except Exception as e:
+        print("❌ Lỗi:", str(e))
+        return JSONResponse(content={"error": str(e)}, status_code=500)
